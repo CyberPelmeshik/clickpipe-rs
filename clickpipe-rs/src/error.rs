@@ -28,4 +28,7 @@ pub enum AppError {
     // Здесь храним String, чтобы можно было вернуть понятное сообщение.
     #[error("validation error: {0}")]
     Validation(String),
+
+    #[error("http error: {0}")]
+    Http(#[from] ureq::Error),
 }

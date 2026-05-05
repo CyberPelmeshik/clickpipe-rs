@@ -2,6 +2,7 @@
 // После этого к их содержимому можно обращаться через error::..., model::... и т.д.
 mod error;
 mod model;
+mod sink;
 mod source;
 mod validate;
 
@@ -53,7 +54,9 @@ fn run(path: &str) -> Result<(), error::AppError> {
         match validate::normalize_event(raw) {
             // Валидное событие сохраняем для дальнейшей обработки.
             // Сейчас дальнейшая обработка - это просто печать в консоль.
-            Ok(event) => valid_events.push(event),
+            Ok(event) => {
+                valid_events.push(event);
+            }
             Err(err) => {
                 // Ошибка валидации одного события не останавливает весь процесс.
                 // Для ingester это важное поведение: плохая запись не должна ломать всю пачку.
@@ -62,6 +65,8 @@ fn run(path: &str) -> Result<(), error::AppError> {
             }
         }
     }
+
+    sink::insert_events(&valid_events)?;
 
     // Печатаем простую статистику по запуску.
     println!("Total events: {total}");
