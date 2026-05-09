@@ -1,0 +1,13 @@
+[input]
+file = "sample/events.jsonl"
+
+[clickhouse]
+url = "http://localhost:8123"
+db = "app"
+table = "events"
+user = "app"
+password = "app_password"
+
+[batch]
+size = 1000
+flush_interval_secs = 1
