@@ -11,12 +11,25 @@ mod validate;
 // Берем тип NormalizedEvent из модуля model.
 // Это уже проверенное и приведенное к удобному виду событие.
 use crate::model::NormalizedEvent;
+use clap::Parser;
+
+#[derive(Parser, Debug)]
+#[command(name = "clickpipe")]
+#[command(version = "0.1")]
+#[command(about = "Fault-tolerant event ingester for ClickHouse in Rust with local disk buffering, batching, retry, and deduplication.", long_about = None)]
+struct Cli {
+    /// path to filep
+    #[arg(short = 'p', long = "path")]
+    path: String,
+}
 
 fn main() {
+    let args = Cli::parse();
+
     // Пока путь к файлу с событиями жестко задан в коде.
     // Программа ожидает, что запуск будет из корня Rust-проекта clickpipe-rs,
     // где существует папка sample/events.jsonl.
-    let input_path = "sample/events.jsonl";
+    let input_path = &args.path;
 
     // main сам не содержит бизнес-логику: он только запускает run()
     // и красиво обрабатывает итоговый Result.
