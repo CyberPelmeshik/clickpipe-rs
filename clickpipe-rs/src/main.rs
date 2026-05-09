@@ -59,17 +59,14 @@ struct Cli {
 
 fn main() {
     let args = Cli::parse();
-    let mut config = Config::defaults();
 
-    // Пока путь к файлу с событиями жестко задан в коде.
-    // Программа ожидает, что запуск будет из корня Rust-проекта clickpipe-rs,
-    // где существует папка sample/events.jsonl.
-    config.merge_cli(&args);
-    //config.merge_file(&args.config_file);
-    config.apply_env();
+    let config = Config::build(
+        args.config_file.as_deref(), // --config (путь к TOML)
+        &args,                       // весь Cli целиком
+    );
 
-    // main сам не содержит бизнес-логику: он только запускает run()
-    // и красиво обрабатывает итоговый Result.
+    println!("{config:#?}"); // отладка
+
     match run(
         &config.input_file,
         &config.clickhouse_url,
@@ -78,10 +75,7 @@ fn main() {
         &config.clickhouse_user,
         &config.clickhouse_password,
     ) {
-        // Ok(()) означает, что вся обработка завершилась успешно.
         Ok(()) => println!("Done"),
-        // Err(e) означает, что случилась фатальная ошибка:
-        // например, файл не найден или строка не распарсилась как JSON.
         Err(e) => eprintln!("Fatal error: {e}"),
     }
 }

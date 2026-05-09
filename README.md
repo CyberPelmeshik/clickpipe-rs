@@ -61,9 +61,9 @@ cargo build --release
 - [x] Clap CLI (базовый)
 
 ### 🟡 v0.2.0 — Настоящий CLI и конфигурация
-- [ ] Аргументы: `--input-file`, `--clickhouse-url`, `--batch-size`, `--flush-interval`
-- [ ] TOML/YAML конфиг-файл
-- [ ] Переменные окружения как fallback
+- [x] Аргументы: `--input-file`, `--clickhouse-url`, `--batch-size`, `--flush-interval`
+- [x] TOML/YAML конфиг-файл
+- [x] Переменные окружения как fallback
 - [ ] Graceful shutdown (Ctrl+C)
 
 ### 🟠 v0.3.0 — Fault Tolerance
