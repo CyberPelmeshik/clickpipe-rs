@@ -2,6 +2,7 @@
 Подключаем соседние файлы из папки src как модули текущего crate.
 После этого к их содержимому можно обращаться через error::..., model::... и т.д.
 */
+mod config;
 mod error;
 mod model;
 mod sink;
@@ -10,6 +11,7 @@ mod validate;
 
 // Берем тип NormalizedEvent из модуля model.
 // Это уже проверенное и приведенное к удобному виду событие.
+use crate::config::Config;
 use crate::model::NormalizedEvent;
 use clap::Parser;
 
@@ -18,22 +20,64 @@ use clap::Parser;
 #[command(version = "0.1")]
 #[command(about = "Fault-tolerant event ingester for ClickHouse in Rust with local disk buffering, batching, retry, and deduplication.", long_about = None)]
 struct Cli {
-    /// path to filep
-    #[arg(short = 'p', long = "path")]
-    path: String,
+    /// ClickHouse HTTP URL
+    #[arg(short = 'c', long = "clickhouse-url")]
+    clickhouse_url: Option<String>, // ← None = пользователь не передавал
+
+    /// ClickHouse database
+    #[arg(long = "db")]
+    clickhouse_db: Option<String>,
+
+    /// ClickHouse table
+    #[arg(long = "table")]
+    clickhouse_table: Option<String>,
+
+    /// ClickHouse user
+    #[arg(long = "user")]
+    clickhouse_user: Option<String>,
+
+    /// ClickHouse password
+    #[arg(long = "password")]
+    clickhouse_password: Option<String>,
+
+    /// Batch size
+    #[arg(short = 'b', long = "batch-size")]
+    batch_size: Option<usize>,
+
+    /// Flush interval in seconds
+    #[arg(long = "flush-interval")]
+    flush_interval_secs: Option<u64>,
+
+    /// Input file
+    #[arg(short = 'i', long = "input-file")]
+    input_file: Option<String>,
+
+    /// Config file path
+    #[arg(short = 'f', long = "config")]
+    config_file: Option<String>,
 }
 
 fn main() {
     let args = Cli::parse();
+    let mut config = Config::defaults();
 
     // Пока путь к файлу с событиями жестко задан в коде.
     // Программа ожидает, что запуск будет из корня Rust-проекта clickpipe-rs,
     // где существует папка sample/events.jsonl.
-    let input_path = &args.path;
+    config.merge_cli(&args);
+    //config.merge_file(&args.config_file);
+    config.apply_env();
 
     // main сам не содержит бизнес-логику: он только запускает run()
     // и красиво обрабатывает итоговый Result.
-    match run(input_path) {
+    match run(
+        &config.input_file,
+        &config.clickhouse_url,
+        &config.clickhouse_db,
+        &config.clickhouse_table,
+        &config.clickhouse_user,
+        &config.clickhouse_password,
+    ) {
         // Ok(()) означает, что вся обработка завершилась успешно.
         Ok(()) => println!("Done"),
         // Err(e) означает, что случилась фатальная ошибка:
@@ -47,7 +91,14 @@ fn main() {
 // 2. попробовать нормализовать каждое событие;
 // 3. посчитать валидные и невалидные события;
 // 4. вывести результат в консоль.
-fn run(path: &str) -> Result<(), error::AppError> {
+fn run(
+    path: &str,
+    clickhouse_url: &str,
+    clickhouse_db: &str,
+    clickhouse_table: &str,
+    clickhouse_user: &str,
+    clickhouse_password: &str,
+) -> Result<(), error::AppError> {
     // source::read_raw_events читает JSONL-файл и возвращает Vec<RawEvent>.
     // Оператор ? означает: если вернулась ошибка, сразу выйти из run с этой ошибкой.
     let raw_events = source::read_raw_events(path)?;
@@ -81,7 +132,14 @@ fn run(path: &str) -> Result<(), error::AppError> {
         }
     }
 
-    sink::insert_events(&valid_events)?;
+    sink::insert_events(
+        &valid_events,
+        clickhouse_url,
+        clickhouse_db,
+        clickhouse_table,
+        clickhouse_user,
+        clickhouse_password,
+    )?;
 
     // Печатаем простую статистику по запуску.
     println!("Total events: {total}");

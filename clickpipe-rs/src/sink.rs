@@ -14,7 +14,14 @@ struct ClickHouseEventRow<'a> {
     event_hash: u64,
 }
 
-pub fn insert_events(events: &[NormalizedEvent]) -> Result<(), AppError> {
+pub fn insert_events(
+    events: &[NormalizedEvent],
+    clickhouse_url: &str,
+    clickhouse_db: &str,
+    clickhouse_table: &str,
+    clickhouse_user: &str,
+    clickhouse_password: &str,
+) -> Result<(), AppError> {
     if events.is_empty() {
         return Ok(());
     }
@@ -36,11 +43,11 @@ pub fn insert_events(events: &[NormalizedEvent]) -> Result<(), AppError> {
     }
 
     let body = lines.join("\n");
-
-    ureq::post("http://localhost:8123/?query=INSERT%20INTO%20app.events%20FORMAT%20JSONEachRow")
+    // print!("{clickhouse_url}/?query=INSERT%20INTO%20{clickhouse_db}.{clickhouse_table}%20FORMAT%20JSONEachRow");
+    ureq::post(format!("{clickhouse_url}/?query=INSERT%20INTO%20{clickhouse_db}.{clickhouse_table}%20FORMAT%20JSONEachRow"))
         .header("Content-Type", "text/plain")
-        .header("X-ClickHouse-User", "app")
-        .header("X-ClickHouse-Key", "app_password")
+        .header("X-ClickHouse-User", clickhouse_user)
+        .header("X-ClickHouse-Key", clickhouse_password)
         .send(&body)?;
 
     Ok(())
