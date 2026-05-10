@@ -14,6 +14,8 @@ mod validate;
 use crate::config::Config;
 use crate::model::NormalizedEvent;
 use clap::Parser;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 #[derive(Parser, Debug)]
 #[command(name = "clickpipe")]
@@ -58,23 +60,21 @@ struct Cli {
 }
 
 fn main() {
+    // Флаг: "поступил сигнал на завершение?"
+    let shutdown_flag = Arc::new(AtomicBool::new(false));
+    let flag_clone = shutdown_flag.clone();
+
+    // Устанавливаем обработчик Ctrl+C
+    ctrlc::set_handler(move || {
+        println!("\n⏳ Graceful shutdown...");
+        flag_clone.store(true, Ordering::SeqCst); // сигнал: пора выключаться
+    })
+    .expect("Error setting Ctrl+C handler");
+
     let args = Cli::parse();
+    let config = Config::build(args.config_file.as_deref(), &args);
 
-    let config = Config::build(
-        args.config_file.as_deref(), // --config (путь к TOML)
-        &args,                       // весь Cli целиком
-    );
-
-    println!("{config:#?}"); // отладка
-
-    match run(
-        &config.input_file,
-        &config.clickhouse_url,
-        &config.clickhouse_db,
-        &config.clickhouse_table,
-        &config.clickhouse_user,
-        &config.clickhouse_password,
-    ) {
+    match run(&config, &shutdown_flag) {
         Ok(()) => println!("Done"),
         Err(e) => eprintln!("Fatal error: {e}"),
     }
@@ -85,67 +85,61 @@ fn main() {
 // 2. попробовать нормализовать каждое событие;
 // 3. посчитать валидные и невалидные события;
 // 4. вывести результат в консоль.
-fn run(
-    path: &str,
-    clickhouse_url: &str,
-    clickhouse_db: &str,
-    clickhouse_table: &str,
-    clickhouse_user: &str,
-    clickhouse_password: &str,
-) -> Result<(), error::AppError> {
-    // source::read_raw_events читает JSONL-файл и возвращает Vec<RawEvent>.
-    // Оператор ? означает: если вернулась ошибка, сразу выйти из run с этой ошибкой.
-    let raw_events = source::read_raw_events(path)?;
+fn run(config: &Config, shutdown: &AtomicBool) -> Result<(), error::AppError> {
+    let raw_events = source::read_raw_events(&config.input_file)?;
 
-    // Сохраняем общее количество событий до того, как начнем их фильтровать.
+    // Если сигнал пришёл во время чтения — выходим
+    if shutdown.load(Ordering::SeqCst) {
+        println!("Shutdown before processing");
+        return Ok(());
+    }
+
     let total = raw_events.len();
-
-    // Сюда будем складывать только те события, которые прошли валидацию.
     let mut valid_events: Vec<NormalizedEvent> = Vec::new();
-
-    // А здесь считаем события, которые пришлось пропустить из-за ошибки валидации.
     let mut invalid_count = 0usize;
 
-    // raw_events передается в цикл по значению.
-    // Это нормально: после нормализации исходный RawEvent больше не нужен.
     for raw in raw_events {
-        // normalize_event превращает RawEvent в NormalizedEvent
-        // или возвращает AppError::Validation с объяснением проблемы.
+        // Проверяем флаг на каждом событии — быстрое реагирование
+        if shutdown.load(Ordering::SeqCst) {
+            println!(
+                "Shutdown during validation — saved {} events",
+                valid_events.len()
+            );
+            break; // не бросаем то, что уже навалидировали
+        }
+
         match validate::normalize_event(raw) {
-            // Валидное событие сохраняем для дальнейшей обработки.
-            // Сейчас дальнейшая обработка - это просто печать в консоль.
-            Ok(event) => {
-                valid_events.push(event);
-            }
+            Ok(event) => valid_events.push(event),
             Err(err) => {
-                // Ошибка валидации одного события не останавливает весь процесс.
-                // Для ingester это важное поведение: плохая запись не должна ломать всю пачку.
                 invalid_count += 1;
                 eprintln!("Skipped event: {err}");
             }
         }
     }
 
-    sink::insert_events(
-        &valid_events,
-        clickhouse_url,
-        clickhouse_db,
-        clickhouse_table,
-        clickhouse_user,
-        clickhouse_password,
-    )?;
+    // Отправляем то, что успели накопить (даже если нас прервали)
+    if !valid_events.is_empty() {
+        println!("Flushing {} events...", valid_events.len());
+        sink::insert_events(
+            &valid_events,
+            &config.clickhouse_url,
+            &config.clickhouse_db,
+            &config.clickhouse_table,
+            &config.clickhouse_user,
+            &config.clickhouse_password,
+        )?;
+    }
 
-    // Печатаем простую статистику по запуску.
     println!("Total events: {total}");
     println!("Valid events: {}", valid_events.len());
     println!("Invalid events: {invalid_count}");
 
-    // Пока ClickHouse sink не реализован, валидные события просто выводятся.
-    // Следующий логичный шаг - заменить этот блок на batch insert в ClickHouse.
-    for event in &valid_events {
-        println!("{event:?}");
+    // Если нас прервали — не выводим оставшиеся события
+    if !shutdown.load(Ordering::SeqCst) {
+        for event in &valid_events {
+            println!("{event:?}");
+        }
     }
 
-    // Возвращаем успешный результат без полезного значения.
     Ok(())
 }
